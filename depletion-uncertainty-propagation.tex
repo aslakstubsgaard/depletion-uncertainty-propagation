@@ -1,0 +1,282 @@
+\documentclass[a4paper]{article}
+
+\usepackage{graphicx}
+\usepackage{amsmath,bm}
+\usepackage{cite}
+\usepackage[margin=2cm]{geometry}
+\usepackage{authblk}
+\usepackage{subcaption}
+\usepackage{url}
+\usepackage{siunitx}
+\usepackage{hyperref}
+\usepackage{amssymb}
+\usepackage{parskip}
+\usepackage{booktabs}
+\usepackage{paralist}
+\usepackage{pythonhighlight}
+\usepackage{tikz}
+\newcommand*\Hada{\tikz[baseline=(char.base)]{\node[shape=circle,draw,inner sep=0.7pt] (char) {\tiny{2}};}}
+\newcommand*\rfrac[2]{{}^{#1}\!/_{#2}}
+
+\title{method for monte carlo depletion uncertainty propagation}
+\author{aslak stubsgaard}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+	\noindent
+	monte carlo code, such as openmc, can perform discretized iterative depletion calculations with intermediate calculations to update the transition matrix, however, such codes often don't estimate uncertainty or uncertainty propagation. here the analytical uncertainty propagation is derived for the matrix exponential solution, with the intent that this can be implemented to estimate uncertainty propagation in monte carlo depletion simulation tools.
+\end{abstract}
+
+
+\section*{introduction}
+when performing monte carlo depletion simulations the initial material quantity will have a certain confidence or uncertainty while nuclear data, material properties, material transfer (i.e. potential online or offline processing schemes), and numerical calculation will all affect the uncertainties of the calculated depletion material quantity at a some later time.
+furthermore, these uncertainties are compounding for every depletion step requiring uncertainty propagation to estimate the total final uncertainty. these uncertainties can be estimated using different methods, such as sensitivity analysis, running calculation with a large set of input parameters and comparing the final results, alternatively sensitivity analysis or other methods of estimating the individual timestep transition matrices can be performed and their uncertainties propagated. here the latter method is explored.
+
+considering the system of $N_1,N_2,\ldots,N_n$ isotopes, that obeys the first order linear ordinary differential equations
+\begin{equation}
+\frac{dN_i}{dt}=\sum_{j\neq i} \lambda_{ij}N_j -\lambda_i N_i,~~~\forall i\in\{1,\ldots,n\}
+\end{equation}
+where $\lambda_i$ is the decay constant for $N_i$ and $\lambda_{ji}$ is the reaction rate yielding $N_i$ from isotope $N_j$.
+
+assuming $\lambda_{ij}\in \mathbb{R}$, writing $\bm{N}(t)=(N_1(t),N_2(t),\ldots,N_n(t))^T\in\mathbb{R}^n$, with $\left(\bm{A}\right)_{ij}=\lambda_{ij},~\forall i\neq j$, and $\left(\bm{A}\right)_{ii}=\lambda_{i}$, such that $\bm{A}\in\mathbb{R}^{n\times n}$.
+then the differential equation can be written in matrix notation as
+\begin{equation}
+\dot{\bm{N}}(t)=\bm{A}\bm{N}(t).
+\end{equation}
+this has the well known matrix exponential solution
+\begin{equation}
+\bm{N}(t)=e^{\bm{A}t}\bm{N}(0),
+\end{equation}
+where the exponential can be expressed as a taylor series $e^{\bm{A}t}=\sum_{i=0}^\infty \frac{1}{i!}(\bm{A}t)^i$ and the zeroth order $\bm{A}$ is just the identity matrix.
+
+performing an eigenvalue decomposition on $\bm{A}=\bm{V}\bm{\Lambda}\bm{V}^{-1}$, assuming that $\bm{A}$ is diagonalizable, one gets $\bm{A}^i=\bm{V}\bm{\Lambda}^i\bm{V}^{-1}$, where $\bm{V}\in\mathbb{R}^{n\times n}$ holds the eigenvectors and $\bm{\Lambda}\in\mathbb{R}^{n\times n}$ holds the eigenvalue on its diagonal.
+
+using the decomposition, the problem can be written without any high order matrix multiplication, namely
+\begin{equation}
+e^{\bm{A}t}
+=\bm{V}e^{\bm{\Lambda}t}\bm{V}^{-1}
+=\bm{V}\begin{pmatrix}e^{\bm{\lambda_1}t} &  \\ & \ddots & \\ & & e^{\bm{\lambda_n}t}\end{pmatrix}\bm{V}^{-1}.
+\end{equation}
+
+since the reaction rates in the off diagonal terms of $\bm{A}$ depends on $\bm{N}$, the above solution is only accurate for timestep sizes where $\bm{N}$ doesn't change substantially, and to obtain $\bm{N}(t)$ at an arbitrary time $t$, the calculation needs to be discretized, $\bm{A}$ recalculated at each timestep, and a new matrix decomposition performed at each timestep.
+in practice depletion codes use truncated taylor series approximations to calculate the matrix exponential.
+
+to make the multi isotope derivation for the uncertainty propagation easier to follow, the simplified single isotope case is derived first.
+
+
+\section*{single isotope depletion uncertainty propagation}
+considering the simple system of only one isotope $N$ and $m$ discretized time-steps with transition constants $\lambda_k$ $\forall k\in\{1,\ldots,m\}$, the transition matrix reduces to $\lambda_k$ and iterative depletion equation then takes the form
+\begin{equation}
+N_{k+1}=e^{\lambda_k(t_{k+1}-t_k)}N_k, ~~~\forall k\in\{1,\ldots,m\}.
+\end{equation}
+
+assigning $\lambda_k$ an uncertainty $\sigma_{\lambda_k}$ and assigning $N_0$ an uncertainty $\sigma_{N_0}$ means that each iteration will have uncertainty $\sigma_{N_k}$.
+given $\lambda_k$ and $\sigma_{\lambda_k}$ $\forall k\in\{1,\ldots,m\}$, and $N_0$ and $\sigma_{N_0}$ and the non-linear differential equation for $N_{k+1}$ one can approximate the uncertainty $\sigma_{N_{k+1}}$ as the first order taylor series expansion
+\begin{equation}
+  \sigma_{N_{k+1}}^2
+  =\left(\frac{\partial N_{k+1}}{\partial N_k}\right)^2 \sigma_{N_k}^2
+  +\left(\frac{\partial N_{k+1}}{\partial \lambda_k}\right)^2 \sigma_{\lambda_k}^2
+  +\left(\frac{\partial N_{k+1}}{\partial N_k}\right)\left(\frac{\partial N_{k+1}}{\partial \lambda_k}\right)\text{Cov}\left(N_k,\lambda_k\right).
+\end{equation}
+
+assuming $N_k$ and $\lambda_k$ are uncorrelated, i.e. $\text{Cov}\left(N_k,\lambda_k\right)=0$, and that $\lambda_k$ nondependent on $N_k$, i.e. $\frac{\partial \lambda_k(N_k)}{\partial N_k}=0$, gives
+\begin{equation}
+  \label{eq:simple}
+  \sigma_{N_{k+1}}^2
+  =\left(e^{\lambda_k(t_{k+1}-t_k)}\right)^2 \sigma_{N_k}^2
+  +\left((t_{k+1}-t_k)N_{k+1}\right)^2 \sigma_{\lambda_k}^2.
+\end{equation}
+this expression allows for the approximate propagation of the uncertainties in each discrete time-steps.
+
+equation \ref{eq:simple} is the easiest to implement to get approximate uncertainty propagation in practice, and would likely be sufficient for most applications.
+
+if instead it's assumed that $\frac{\partial \lambda_k(N_k)}{\partial N_k}\neq 0$ and the dependency explicitly expressed as $N_{k+1}=e^{\lambda_k(N_k)(t_{k+1}-t_k)}N_k$.
+then, using the product rule and chain rule, the first term becomes
+\begin{equation}
+  \begin{split}
+	\frac{\partial N_{k+1}}{\partial N_k}
+	&=(e^{\lambda_k(N_k)(t_{k+1}-t_k)})\frac{\partial }{\partial N_k}\left(N_k\right)+\frac{\partial }{\partial N_k}\left(e^{\lambda_k(N_k)(t_{k+1}-t_k)}\right)N_k \\
+	&=e^{\lambda_k(N_k)(t_{k+1}-t_k)+\frac{\partial \lambda_k(N_k)}{\partial N_k}\frac{\partial}{\partial \lambda_k(N_k)}\left(e^{\lambda_k(N_k)(t_{k+1}-t_k)}\right)N_k} \\
+	&=e^{\lambda_k(N_k)(t_{k+1}-t_k)}+\frac{\partial \lambda_k(N_k)}{\partial N_k} (t_{k+1}-t_k) N_{k+1}.
+  \end{split}
+\end{equation}
+
+thus, including $\lambda_k$'s $N_k$-dependency, but still assuming $\text{Cov}\left(N_k,\lambda_k\right)=0$, the that the full expression for the uncertainty propagation is
+\begin{equation}
+  \label{eq:full}
+  \sigma_{N_{k+1}}^2
+  =\left(e^{\lambda_k(t_{k+1}-t_k)}+(t_{k+1}-t_k)\frac{\partial \lambda_k(N_k)}{\partial N_k}N_{k+1}\right)^2 \sigma_{N_k}^2
+  +\left((t_{k+1}-t_k)N_{k+1}\right)^2 \sigma_{\lambda_k}^2.
+\end{equation}
+note that this neglects the numerical uncertainty $\sigma_{\lambda_k(N_k\pm\sigma_{N_k}/2)}$ associated with this calculation.
+
+since $\lambda_k(N_k)$ or $\lambda_{k\left\vert N_k \right.}$ doesn't have a analytical expression the derivative $\frac{\partial \lambda_k(N_k)}{\partial N_k}$ can be approximated numerically as
+\begin{equation}
+  \frac{\partial \lambda_k(N_k)}{\partial N_k} = \frac{\lambda_{k\left\vert N_k+\rfrac{\sigma_{N_k}}{2}\right.} - \lambda_{k\left\vert N_k-\rfrac{\sigma_{N_k}}{2}\right.} }{\sigma_{N_k}},
+\end{equation}
+assuming $\sigma_{N_k}$ is small.
+this is akin to a sensitivity analysis of $\lambda_k$ for each time step, and would in practice mean doing three calculations per time step, with the three inputs $N_k-\rfrac{\sigma_{N_k}}{2}$, $N_k$, and $N_k+\rfrac{\sigma_{N_k}}{2}$ instead of just $N_k$. more practically, the $N_k+\sigma_{N_k}$ and $N_k$ can be used for the basis of the approximation so only one additional monte carlo transport step is needed per timestep.
+
+alternatively, openmc has the capability of calculating the tally derivatives which could also be used to estimate $\frac{\partial \lambda_k(N_k)}{\partial N_k}$.
+
+using equation \ref{eq:full} instead of equation \ref{eq:simple} would yield more accurate uncertainty propagation but also involve substantially higher computational cost.
+
+with this simplified case in mind, the method can easily be extended to the multi-isotope system and simplified using some matrix notation.
+
+
+\section*{matrix depletion uncertainty propagation}
+assuming $m$ distritized timesteps, that $(\bm{A}_k)_{ij}\equiv\lambda_{ij,k}$, and that $\lambda_{ij,k}$ is the decay, reaction, and transfer rates $\forall k\in\{1,\ldots,m\}$, such that $\bm{A}_k\in\mathbb{R}^{n\times n}$, $\bm{N}_k=(N_{1,k},N_{2,k},\ldots,N_{n,k})^T\in\mathbb{R}^n$, and $\dot{\bm{N}_k}=\bm{A}_k\bm{N}_k$ $\forall k\in\{1,\ldots,m\}$.
+then the iterative depletion takes the form
+\begin{equation}
+  \bm{N}_{k+1}=e^{\bm{A}_k(t_{k+1}-t_k)}\bm{N}_k, ~~~\forall k\in\{1,\ldots,m\}.
+\end{equation}
+
+assume $(\bm{\sigma}_{\bm{N}_k})_{i}\equiv\sigma_{N_{i,k}}$ and $(\bm{\sigma}_{\bm{A}_k})_{ij}\equiv\sigma_{\lambda_{ij,k}}$, where $\sigma_{N_{i,k}}$ and $\sigma_{\lambda_{ij,k}}$ are the respective uncertainties of $N_{i,k}$ and $\lambda_{ij,k}$, $\forall k\in\{1,\ldots,m\}$.
+
+following the same approach as in single isotope depletion uncertainty propagation, the $p$'th isotopes abundance uncertainty at time $t_{k+1}$ can be approximated by the first order taylor series expansion
+\begin{equation}
+  \label{eq:depletion}
+  \begin{split}
+  \left[(\bm{\sigma}_{\bm{N}_{k+1}})_p\right]^2
+  &=\sum_q\left[\frac{\partial (\bm{N}_{k+1})_p}{\partial (\bm{N}_k)_q}\right]^2 \left[(\bm{\sigma}_{\bm{N}_k})_q\right]^2
+   +\sum_{j}\left[\frac{\partial (\bm{N}_{k+1})_p}{\partial \lambda_{pj,k}}\right]^2 \sigma_{\lambda_{pj,k}}^2  \\
+  &+\sum_q\sum_{j}\left[\frac{\partial (\bm{N}_{k+1})_p}{\partial (\bm{N}_k)_q}\right]\left[\frac{\partial (\bm{N}_{k+1})_p}{\partial \lambda_{pj,k}}\right]\text{Cov}\left((\bm{N}_k)_q,\lambda_{pj,k}\right) \\
+  &+\sum_{j\neq l}\left[\frac{\partial (\bm{N}_{k+1})_p}{\partial \lambda_{pj,k}}\right]\left[\frac{\partial (\bm{N}_{k+1})_p}{\partial \lambda_{pl}}\right]\text{Cov}\left(\lambda_{pj,k},\lambda_{pl}\right).
+  \end{split}
+\end{equation}
+looking at the derivative in the first expression on the right hand side of equation \ref{eq:depletion}, and explicitly writing $\bm{A}_k$'s dependency on  $\bm{N}_k$, gives
+\begin{equation}
+  \begin{split}
+  \frac{\partial (\bm{N}_{k+1})_p}{\partial (\bm{N}_k)_q}
+  &=\frac{\partial }{\partial (\bm{N}_k)_q} \left( e^{\bm{A}_k(\bm{N}_k)(t_{k+1}-t_k)}\bm{N}_k \right)_p
+  =\frac{\partial }{\partial (\bm{N}_k)_q} \left(\sum_{j}\left( e^{\bm{A}_k(\bm{N}_k)(t_{k+1}-t_k)} \right)_{pj}(\bm{N}_k)_j \right) \\
+  &=\sum_{j}\left( \frac{\partial (\bm{A}_k)_{pj}}{\partial (\bm{N}_k)_q} \right) (t_{k+1}-t_k) \left(e^{\bm{A}_k(\bm{N}_k)(t_{k+1}-t_k)} \right)_{pj}(\bm{N}_k)_j\\
+  &+\left(\sum_{j}\left( e^{\bm{A}_k(\bm{N}_k)(t_{k+1}-t_k)} \right)_{pj}\frac{\partial (\bm{N}_k)_j}{\partial (\bm{N}_k)_q} \right).
+  \end{split}
+\end{equation}
+
+looking at the derivative in the second term on the right hand side of equation \ref{eq:depletion}
+\begin{equation}
+  \begin{split}
+  \frac{\partial (\bm{N}_{k+1})_p}{\partial \lambda_{pj,k}}
+  &=\frac{\partial }{\partial \lambda_{pj,k}} \left( e^{\bm{A}_k(\bm{N}_k)(t_{k+1}-t_k)}\bm{N}_k \right)_p
+   =\frac{\partial }{\partial \lambda_{pj,k}} \left(\sum_{l}\left( e^{\bm{A}_k(\bm{N}_k)(t_{k+1}-t_k)} \right)_{pl}(\bm{N}_k)_l \right) \\
+  &=\sum_{l}\left( \frac{\partial (\bm{A}_k)_{pl}}{\partial \lambda_{pj,k}} \right) (t_{k+1}-t_k) \left(e^{\bm{A}_k(\bm{N}_k)(t_{k+1}-t_k)} \right)_{pl}(\bm{N}_k)_l \\
+  &=(t_{k+1}-t_k) \left(e^{\bm{A}_k(\bm{N}_k)(t_{k+1}-t_k)} \right)_{pj} (\bm{N}_k)_j
+  \end{split}
+\end{equation}
+
+neglecting correlations and the $\frac{\partial \lambda_{pj,k}(\bm{N}_k)}{\partial (\bm{N}_k)_q}$ term, equation \ref{eq:depletion} reduces to
+\begin{equation}
+  \begin{split}
+  \left[(\bm{\sigma}_{\bm{N}_{k+1}})_p\right]^2
+  &=\sum_q\left[\left(e^{\bm{A}_k(t_{k+1}-t_k)}\right)_{pq}\right]^2 \left[(\bm{\sigma}_{\bm{N}_k})_q\right]^2
+  +\sum_{j}\left[(t_{k+1}-t_k) \left(e^{\bm{A}_k(\bm{N}_k)(t_{k+1}-t_k)} \right)_{pj} (\bm{N}_k)_j\right]^2 \sigma_{\lambda_{pj,k}}^2
+\end{split}
+\end{equation}
+
+using the Hadamard product $\circ$ \footnotemark and denoting the Hadamard product of the quantity with itself as $\bm{}^{\Hada}$, the equation can be written as
+\footnotetext{For $A,B\in\mathbb{M}^{m\times n}$ the Hadamard product: $A\circ B\in\mathbb{M}^{m\times n}$ is defined by $(A\circ B)_{ij}=(A)_{ij}(B)_{ij}$ and $A^{\Hada}\equiv A\circ A$}
+\begin{equation}
+  \label{eq:hada-form}
+  \begin{split}
+  \bm{\sigma}_{\bm{N}_{k+1}}^{\Hada}
+  &=\left(e^{\bm{A}_k(t_{k+1}-t_k)}\right)^{\Hada}\bm{\sigma}_{\bm{N}_k}^{\Hada} + (t_{k+1}-t_k)^2 \bm{\sigma}_{\bm{A}_k}^{\Hada}\bm{N}_{k+1}^{\Hada}
+  \end{split}
+\end{equation}
+
+thus, in order to calculated the propagated uncertainty of $\bm{\sigma}_{\bm{N}_{k+1}}$ it's required of the user to specifying $\bm{\sigma}_{\bm{N}_{0}}$ and to specify and calculating $\sigma_{\bm{A}_i}$ $\forall i\in \{1,\ldots,m\}$, along with using the solved the matrix exponential solution for each timestep, already given by the depletion routine. thus, the added computational cost for the uncertainty propagation to estimate $\sigma_{\bm{A}_i}$ for each timestep is minimal.
+
+this method ignore the error introduced from the numerical calculation of the matrix exponential solution, e.g. errors introduced from the taylor series expansion or particle transport calculations.
+
+the ignored $\frac{\partial (\bm{A}_k)_{pj}}{\partial (\bm{N}_k)_q}=\frac{\partial \lambda_{pj,k}(\bm{N}_k) }{\partial (\bm{N}_k)_q}$ term can be approximated numerically as
+\begin{equation}
+  \frac{\partial \lambda_{pj,k}(\bm{N}_k)}{\partial (\bm{N}_k)_q}
+  = \frac{\lambda_{pj,k}(\ldots,(\bm{N}_k)_q+(\sigma_{\bm{N}_k})_q/2,\ldots) - \lambda_{pj,k}(\ldots,(\bm{N}_k)_q-(\sigma_{\bm{N}_k})_q/2,\ldots) }{(\sigma_{\bm{N}_k})_q}.
+\end{equation}
+this approach can more loosely be generalized to get the following approximate expression
+\begin{equation}
+  \label{eq:expanded-hada-form}
+  \begin{split}
+  \bm{\sigma}_{\bm{N}_{k+1}}^{\Hada}
+  &=\left(e^{\bm{A}_k(t_{k+1}-t_k)}+(t_{k+1}-t_k)\frac{\partial \bm{A}_k}{\partial \bm{N}_k}N_{k+1}\right)^{\Hada}\bm{\sigma}_{\bm{N}_k}^{\Hada}
+  + (t_{k+1}-t_k)^2 \bm{\sigma}_{\bm{A}_k}^{\Hada}\bm{N}_{k+1}^{\Hada}. \\
+  \end{split}
+\end{equation}
+
+
+\section*{two isotope matrix form}
+as an example, consider the two isotope system
+
+ $\bm{N}_k=\begin{bmatrix} N_{1,k} \\ N_{2,k} \end{bmatrix}$ and
+ $\bm{A}_k=\begin{bmatrix}
+ \lambda_{11,k} & \lambda_{12,k}\\
+ \lambda_{21,k} & \lambda_{22,k}
+ \end{bmatrix}$,
+
+ $\bm{\sigma}_{\bm{N}_k}=\begin{bmatrix} \sigma_{N_{1,k}} \\ \sigma_{N_{2,k}} \end{bmatrix}$ and
+ $\bm{\sigma}_{\bm{A}_k}=\begin{bmatrix}
+ \sigma_{\lambda_{11,k}} & \sigma_{\lambda_{12,k}}\\
+ \sigma_{\lambda_{21,k}} & \sigma_{\lambda_{22,k}}
+ \end{bmatrix}$,
+
+ and defining $\bm{M}=e^{\bm{A}_k(t_{k+1}-t_k)}=\begin{bmatrix}
+ M_{11,k} & M_{12,k}\\
+ M_{21,k} & M_{22,k}
+ \end{bmatrix}$ as the calculated matrix exponential,
+
+then equation \ref{eq:hada-form}, $\bm{\sigma}_{\bm{N}_{k+1}}^{\Hada}=\left(e^{\bm{A}_k(t_{k+1}-t_k)}\right)^{\Hada}\bm{\sigma}_{\bm{N}_k}^{\Hada} + (t_{k+1}-t_k)^2 \bm{\sigma}_{\bm{A}_k}^{\Hada}\bm{N}_{k+1}^{\Hada}$, takes the form
+\begin{equation}
+  \begin{split}
+  \begin{bmatrix} \sigma_{N_{1,k}}^2 \\ \sigma_{N_{2,k}}^2 \end{bmatrix}
+  &=\begin{bmatrix}
+  M_{11,k}^2 & M_{12,k}^2\\
+  M_{21,k}^2 & M_{22,k}^2
+  \end{bmatrix}
+  \begin{bmatrix} \sigma_{N_{1,k}}^2 \\ \sigma_{N_{2,k}}^2 \end{bmatrix}
+  + (t_{k+1}-t_k)^2 \begin{bmatrix}
+  \sigma_{\lambda_{11,k}}^2 & \sigma_{\lambda_{12,k}}^2\\
+  \sigma_{\lambda_{21,k}}^2 & \sigma_{\lambda_{22,k}}^2
+  \end{bmatrix}
+  \begin{bmatrix} N_{1,k+1}^2 \\ N_{2,k+1}^2 \end{bmatrix} \\
+  &=\begin{bmatrix}
+  M_{11,k}^2 \sigma_{N_{1,k}}^2 + M_{12,k}^2 \sigma_{N_{2,k}}^2 + (t_{k+1}-t_k)^2 \left( \sigma_{\lambda_{11,k}}^2 N_{1,k+1}^2 + \sigma_{\lambda_{12,k}}^2 N_{2,k+1}^2 \right)  \\
+  M_{21,k}^2 \sigma_{N_{1,k}}^2+ M_{22,k}^2 \sigma_{N_{1,k}}^2 + (t_{k+1}-t_k)^2 \left( \sigma_{\lambda_{21,k}}^2 N_{1,k+1}^2 + \sigma_{\lambda_{22,k}}^2 N_{2,k+1}^2 \right)
+  \end{bmatrix}.
+  \end{split}
+\end{equation}
+
+
+\section*{coupled materials}
+in the case of multiple coupled materials, e.g. with transfer rates between different materials, the same approach for uncertainty propagation can be used.
+
+consider $s$ coupled materials $\bm{N}_{k;i}=(N_{1,k;i},N_{2,k;i},\ldots,N_{n_i,k;i})^T\in\mathbb{R}^{n_i}$ with individual transition matrices $\bm{A}_{k;i}\in\mathbb{R}^{n_i\times n_i}$ $\forall i\in\{1,\ldots,s\}$ and sparce transfer rate matrices $\bm{T}_{k;ij}\in\mathbb{R}^{n_i\times n_j}$ $\forall i,j\in\{1,\ldots,s\}$ where $i\neq j$ describing the rates from material $j$ to $i$.
+
+redefinding $\bm{N}_k=\left(\bm{N}_{k;1},\bm{N}_{k;2},\ldots,\bm{N}_{k;s}\right)^T\in\mathbb{R}^{\sum_{i=1}^s n_i}$ and $(\bm{A}_k)_{ii}\equiv\bm{A}_{k;i}$ and $(\bm{A}_k)_{ij}\equiv\bm{T}_{k;ij}$ yielding $\bm{A}_k\in\mathbb{R}^{\sum_{i=1}^s n_i\times \sum_{i=1}^s n_i}$ and similarly redefining $\bm{\sigma}_{\bm{N}_k}$ and $\bm{\sigma}_{\bm{A}_k}$, as the respective uncertainty matrices of $\bm{N}_k$ and $\bm{A}_k$, equation \ref{eq:hada-form} and \ref{eq:expanded-hada-form} still applies. note that the sub-matrices $\bm{\sigma}_{\bm{T}_{k;ij}}$ are user defined.
+
+
+\section*{uncertainty estimation}
+$\bm{\sigma}_{\bm{N}_0}$ and the sub-matrices $\bm{\sigma}_{\bm{T}_{k;ij}}$ can be specified by the user as part of the material file definition and transfer rate definitions, respectively.
+only including these factors would not include running additional monte carlo transport calculations or matrix exponential solution, and can thus be achieved with minimal additional computational cost to obtain $\bm{\sigma}_{\bm{N}_{k}}$ $\forall i\in\{1,\ldots,m\}$.
+
+$\bm{\sigma}_{\bm{A}_k}$ stems from the statistical certainty of the monte carlo calculation and from nuclear data uncertainties propagated through the monte carlo solution, neither of which having a numerical solution. thus, $\bm{\sigma}_{\bm{A}_k}$ must be estimated and this can be done in multiple ways, with potentially large computational effort and might be prohibitive to estimate in certain cases.
+
+a crude estimation of $\bm{\sigma}_{\bm{A}_k}$ can be achieved by obtaining $\bm{A}_i$ with a small $M$ sets of different nuclear data libraries, using the same statistics but different pseudorandom number generator seeds, and from these calculating the uncertainty as $\bm{\sigma}_{\bm{A}_k}^{\Hada}\sim\rfrac{1}{M-1}\sum_{i=1}^M \left(\bm{A}_{k\vert i}-\bar{\bm{A}_k}\right)^{\Hada}$. alternatively, $\bm{\sigma}_{\bm{A}_k}$ can be estimated using more rigurous total monte carlo methods.
+
+if the affect of $\bm{A}_k$'s dependency of $\bm{N}_k$ is included, one can use the crude estimate $\frac{\partial \bm{A}_k}{\partial \bm{N}_k} \sim \frac{\bm{A}_{k\vert \bm{N}_k+\bm{\sigma}_{\bm{N}_k}} - \bm{A}_{k\vert \bm{N}_k}}{\bm{\sigma_{\bm{N}_k}}}$, results in two additional monte carlo transport calculations per timestep, assuming $\bm{N}_k\pm\rfrac{\bm{\sigma}_{\bm{N}_k}}{2}$ instead of $\bm{N}_k$ as input to the monte carlo transport calculations, but ignores recalculating $\bm{\sigma}_{\bm{A}_i}$.
+alternatively, $\frac{\partial \bm{A}_k}{\partial \bm{N}_k}$ can be estimated using openmc's tally derivative capabilities.
+
+
+\section*{conclusion}
+uncertainty propagation theory is employed to obtained a reduced expression for calculating the propagated uncertainties for discretized depletion simulation, including for coupled materials, but assumes that material quantities and transition matrix values are uncorrelated and ignoring the error introduced from the numerical calculation of the matrix exponential solution. the method relies on user defined material uncertainties and transfer rate uncertainties, as well as estimation of the transition matrix uncertainty for each timestep of a monte carlo depletion simulation.
+
+by ignoring the uncertainty of monte carlo transport and only considering user defined uncertainties, an expression for propagating the user defined uncertainties is obtained with minimal additional computation cost.
+
+including the uncertainties of monte carlo transport, an expression for propagating the combined uncertainties is obtained with moderate to significant additional computation cost. the derived expression is invariant to how the transition matrix uncertainties are calculated making it broadly applicable.
+
+it's the expectation that the derived expression could be implemented in monte carlo depletion tools as an optional feature, for uncertainty propagation.
+
+\end{document}
